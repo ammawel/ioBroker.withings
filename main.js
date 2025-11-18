@@ -381,93 +381,67 @@ class Withings extends utils.Adapter {
   * Schreibe pro Measure-Type den letzten (neuesten) Messwert als State unter userid.lastMeasures.<type>
   * measuregrps wird idealerweise sortiert übergeben (neueste zuerst), aber wir schützen uns trotzdem.
   */
-   /**
-    * Schreibe pro Measure-Type:
-    *   <type>             = letzter Wert
-    *   <type>_update      = lokale Zeit (de-DE) ohne Komma
-    *   <type>_timestamp   = Rohwert der Messung (Unix Sekunden)
-    */
-   async writeLastMeasures(userid, measuregrps, descriptions) {
-   	if (!Array.isArray(measuregrps) || measuregrps.length === 0) return;
+async writeLastMeasures(userid, measuregrps, descriptions) {
+   if (!Array.isArray(measuregrps) || measuregrps.length === 0) return;
 
-   	await this.setObjectNotExistsAsync(`${userid}.lastMeasures`, {
-   		type: "channel",
-   		common: { name: "Letzte Messwerte" },
-   		native: {},
-   	});
+   await this.setObjectNotExistsAsync(`${userid}.lastMeasures`, {
+       type: "channel",
+       common: { name: "Letzte Messwerte" },
+       native: {},
+   });
 
-   	const seen = new Set();
+   const seen = new Set();
 
-   	for (const grp of measuregrps) {
-   		if (!grp?.measures) continue;
+   for (const grp of measuregrps) {
+       if (!grp?.measures) continue;
 
-   		const tsRaw = Number(grp.date) || null; // Sekunden
-   		const tsLocal = tsRaw
-   			? new Date(tsRaw * 1000).toLocaleString("de-DE").replace(",", "")
-   			: null;
+       const tsRaw = Number(grp.date) || null; // Sekunden
 
-   		for (const m of grp.measures) {
-   			const t = m.type;
-   			if (seen.has(t)) continue;
+       for (const m of grp.measures) {
+           const t = m.type;
+           if (seen.has(t)) continue;
 
-   			const val = m.value * Math.pow(10, m.unit);
+           const val = m.value * Math.pow(10, m.unit);
+           const base = `${userid}.lastMeasures.${t}`;
+           const raw = `${userid}.lastMeasures.${t}_timestamp`;
 
-   			const base = `${userid}.lastMeasures.${t}`;
-   			const upd  = `${userid}.lastMeasures.${t}_update`;
-   			const raw  = `${userid}.lastMeasures.${t}_timestamp`;
+           // --- Wert ---
+           await this.setObjectNotExistsAsync(base, {
+               type: "state",
+               common: {
+                   name: descriptions?.[t] || `Measure ${t}`,
+                   type: "number",
+                   role: "value",
+                   read: true,
+                   write: false,
+               },
+               native: { type: t, unit: m.unit },
+           });
+           await this.setStateAsync(base, { val: val, ack: true });
 
-   			// --- Wert ---
-   			await this.setObjectNotExistsAsync(base, {
-   				type: "state",
-   				common: {
-   					name: descriptions?.[t] || `Measure ${t}`,
-   					type: "number",
-   					role: "value",
-   					read: true,
-   					write: false,
-   				},
-   				native: { type: t, unit: m.unit },
-   			});
-   			await this.setStateAsync(base, { val: val, ack: true });
+           // --- Raw Timestamp ---
+           await this.setObjectNotExistsAsync(raw, {
+               type: "state",
+               common: {
+                   name: `Timestamp Measure ${t}`,
+                   type: "number",
+                   role: "date", // <-- hier geändert
+                   read: true,
+                   write: false,
+               },
+               native: {},
+           });
+           await this.setStateAsync(raw, { val: tsRaw, ack: true });
 
-   			// --- Lokale Zeit ---
-   			await this.setObjectNotExistsAsync(upd, {
-   				type: "state",
-   				common: {
-   					name: `Updatezeit Measure ${t}`,
-   					type: "string",
-   					role: "value.datetime",
-   					read: true,
-   					write: false,
-   				},
-   				native: {},
-   			});
-   			await this.setStateAsync(upd, { val: tsLocal, ack: true });
-
-   			// --- Raw Timestamp ---
-   			await this.setObjectNotExistsAsync(raw, {
-   				type: "state",
-   				common: {
-   					name: `Timestamp Measure ${t}`,
-   					type: "number",
-   					role: "value",
-   					read: true,
-   					write: false,
-   				},
-   				native: {},
-   			});
-   			await this.setStateAsync(raw, { val: tsRaw, ack: true });
-
-   			seen.add(t);
-   		}
-   	}
+           seen.add(t);
+       }
    }
+}
 
 
  /**
   * Schreibe die letzte Aktivität als States unter userid.lastActivity.<key>
   * data ist die body-Antwort mit data.activities (Array)
-  * Konvertiert: modified -> ISO
   */
  async writeLastActivity(userid, data) {
    try {
