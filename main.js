@@ -374,7 +374,7 @@ class Withings extends utils.Adapter {
    if (val === null || val === undefined) return null;
    const n = Number(val);
    if (Number.isNaN(n)) return null;
-   return new Date(n * 1000).toISOString();
+   return new Date(n * 1000).toLocaleString("de-DE").replace(",", "");
  }
 
  /**
@@ -402,7 +402,7 @@ class Withings extends utils.Adapter {
 
    	const ts =
    	  typeof grp.date === "number"
-   		? new Date(grp.date * 1000).toISOString()
+   		? new Date(grp.date * 1000).toLocaleString("de-DE").replace(",", "")
    		: null;
 
    	for (const m of grp.measures) {
