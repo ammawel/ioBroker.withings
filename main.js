@@ -381,50 +381,74 @@ class Withings extends utils.Adapter {
   * Schreibe pro Measure-Type den letzten (neuesten) Messwert als State unter userid.lastMeasures.<type>
   * measuregrps wird idealerweise sortiert übergeben (neueste zuerst), aber wir schützen uns trotzdem.
   */
- async writeLastMeasures(userid, measuregrps, descriptions) {
-   if (!Array.isArray(measuregrps)) return;
+   /**
+    * Schreibe pro Measure-Type:
+    *   <type>          = letzter Wert
+    *   <type>_update   = ISO-Timestamp der Messung (grp.date)
+    */
+   async writeLastMeasures(userid, measuregrps, descriptions) {
+     if (!Array.isArray(measuregrps)) return;
 
-   // Channel anlegen
-   await this.setObjectNotExistsAsync(userid + ".lastMeasures", {
-     type: "channel",
-     common: {
-       name: "Letzte Messwerte",
-     },
-     native: {},
-   });
+     await this.setObjectNotExistsAsync(`${userid}.lastMeasures`, {
+   	type: "channel",
+   	common: { name: "Letzte Messwerte" },
+   	native: {},
+     });
 
-   const seen = new Set();
+     const seen = new Set();
 
-   // Falls measuregrps nicht sortiert sind, ist das kein Problem – wir nehmen den ersten Vorkommnis je type,
-   // weil im UpdateDevices die measuregrps bereits sortiert werden (neueste zuerst).
-   for (const grp of measuregrps) {
-     if (!grp || !Array.isArray(grp.measures)) continue;
-     for (const m of grp.measures) {
-       const t = m.type;
-       if (seen.has(t)) continue; // schon den letzten Wert für diesen Typ geschrieben
-       const val = m.value * Math.pow(10, m.unit);
-       const stateId = `${userid}.lastMeasures.${t}`;
+     for (const grp of measuregrps) {
+   	if (!grp || !Array.isArray(grp.measures)) continue;
 
-       await this.setObjectNotExistsAsync(stateId, {
-         type: "state",
-         common: {
-           name: descriptions && descriptions[t] ? descriptions[t] : `Measure ${t}`,
-           type: "number",
-           role: "value",
-           read: true,
-           write: false,
-         },
-         native: {
-           type: t,
-           unit: m.unit,
-         },
-       });
+   	const ts =
+   	  typeof grp.date === "number"
+   		? new Date(grp.date * 1000).toISOString()
+   		: null;
 
-       await this.setStateAsync(stateId, { val: val, ack: true });
-       seen.add(t);
+   	for (const m of grp.measures) {
+   	  const t = m.type;
+   	  if (seen.has(t)) continue;
+
+   	  const val = m.value * Math.pow(10, m.unit);
+
+   	  const base = `${userid}.lastMeasures.${t}`;
+   	  const upd = `${userid}.lastMeasures.${t}_update`;
+
+   	  // --- Wert ---
+   	  await this.setObjectNotExistsAsync(base, {
+   		type: "state",
+   		common: {
+   		  name: descriptions?.[t] || `Measure ${t}`,
+   		  type: "number",
+   		  role: "value",
+   		  read: true,
+   		  write: false,
+   		},
+   		native: { type: t, unit: m.unit },
+   	  });
+
+   	  await this.setStateAsync(base, { val: val, ack: true });
+
+   	  // --- Update Timestamp ---
+   	  await this.setObjectNotExistsAsync(upd, {
+   		type: "state",
+   		common: {
+   		  name: `Timestamp Measure ${t}`,
+   		  type: "string",
+   		  role: "value.datetime",
+   		  read: true,
+   		  write: false,
+   		},
+   		native: {},
+   	  });
+
+   	  await this.setStateAsync(upd, { val: ts, ack: true });
+
+   	  seen.add(t);
+   	}
      }
    }
- }
+
 
  /**
   * Schreibe die letzte Aktivität als States unter userid.lastActivity.<key>
@@ -436,7 +460,7 @@ class Withings extends utils.Adapter {
      if (!data || !Array.isArray(data.activities) || data.activities.length === 0) return;
 
      // Wir haben in updateDevices() data.activities.sort(...) – dort wird sortiert. Hier nehmen wir das erste Element (neueste)
-     const activity = data.activities[0] || data.activities[data.activities.length - 1];
+     const activity = data.activities[0];
      if (!activity) return;
 
      // Channel anlegen
@@ -674,7 +698,8 @@ class Withings extends utils.Adapter {
              });
            }
            if (data.activities) {
-             data.activities.sort((a, b) => a.date.localeCompare(b.date));
+             // sort activities by modified timestamp (newest first)
+             data.activities.sort((a, b) => (b.modified || 0) - (a.modified || 0));
            }
            if (element.path === "sleepSummary" || element.path === "sleep") {
              if (data.series && data.series.sort) {
@@ -919,3 +944,4 @@ if (require.main !== module) {
  // otherwise start the instance directly
  new Withings();
 }
+
