@@ -383,70 +383,84 @@ class Withings extends utils.Adapter {
   */
    /**
     * Schreibe pro Measure-Type:
-    *   <type>          = letzter Wert
-    *   <type>_update   = ISO-Timestamp der Messung (grp.date)
+    *   <type>             = letzter Wert
+    *   <type>_update      = lokale Zeit (de-DE) ohne Komma
+    *   <type>_timestamp   = Rohwert der Messung (Unix Sekunden)
     */
    async writeLastMeasures(userid, measuregrps, descriptions) {
-     if (!Array.isArray(measuregrps)) return;
+   	if (!Array.isArray(measuregrps) || measuregrps.length === 0) return;
 
-     await this.setObjectNotExistsAsync(`${userid}.lastMeasures`, {
-   	type: "channel",
-   	common: { name: "Letzte Messwerte" },
-   	native: {},
-     });
-
-     const seen = new Set();
-
-     for (const grp of measuregrps) {
-   	if (!grp || !Array.isArray(grp.measures)) continue;
-
-   	const ts =
-   	  typeof grp.date === "number"
-   		? new Date(grp.date * 1000).toLocaleString("de-DE").replace(",", "")
-   		: null;
-
-   	for (const m of grp.measures) {
-   	  const t = m.type;
-   	  if (seen.has(t)) continue;
-
-   	  const val = m.value * Math.pow(10, m.unit);
-
-   	  const base = `${userid}.lastMeasures.${t}`;
-   	  const upd = `${userid}.lastMeasures.${t}_update`;
-
-   	  // --- Wert ---
-   	  await this.setObjectNotExistsAsync(base, {
-   		type: "state",
-   		common: {
-   		  name: descriptions?.[t] || `Measure ${t}`,
-   		  type: "number",
-   		  role: "value",
-   		  read: true,
-   		  write: false,
-   		},
-   		native: { type: t, unit: m.unit },
-   	  });
-
-   	  await this.setStateAsync(base, { val: val, ack: true });
-
-   	  // --- Update Timestamp ---
-   	  await this.setObjectNotExistsAsync(upd, {
-   		type: "state",
-   		common: {
-   		  name: `Timestamp Measure ${t}`,
-   		  type: "string",
-   		  role: "value.datetime",
-   		  read: true,
-   		  write: false,
-   		},
+   	await this.setObjectNotExistsAsync(`${userid}.lastMeasures`, {
+   		type: "channel",
+   		common: { name: "Letzte Messwerte" },
    		native: {},
-   	  });
+   	});
 
-   	  await this.setStateAsync(upd, { val: ts, ack: true });
+   	const seen = new Set();
 
-   	  seen.add(t);
+   	for (const grp of measuregrps) {
+   		if (!grp?.measures) continue;
+
+   		const tsRaw = Number(grp.date) || null; // Sekunden
+   		const tsLocal = tsRaw
+   			? new Date(tsRaw * 1000).toLocaleString("de-DE").replace(",", "")
+   			: null;
+
+   		for (const m of grp.measures) {
+   			const t = m.type;
+   			if (seen.has(t)) continue;
+
+   			const val = m.value * Math.pow(10, m.unit);
+
+   			const base = `${userid}.lastMeasures.${t}`;
+   			const upd  = `${userid}.lastMeasures.${t}_update`;
+   			const raw  = `${userid}.lastMeasures.${t}_timestamp`;
+
+   			// --- Wert ---
+   			await this.setObjectNotExistsAsync(base, {
+   				type: "state",
+   				common: {
+   					name: descriptions?.[t] || `Measure ${t}`,
+   					type: "number",
+   					role: "value",
+   					read: true,
+   					write: false,
+   				},
+   				native: { type: t, unit: m.unit },
+   			});
+   			await this.setStateAsync(base, { val: val, ack: true });
+
+   			// --- Lokale Zeit ---
+   			await this.setObjectNotExistsAsync(upd, {
+   				type: "state",
+   				common: {
+   					name: `Updatezeit Measure ${t}`,
+   					type: "string",
+   					role: "value.datetime",
+   					read: true,
+   					write: false,
+   				},
+   				native: {},
+   			});
+   			await this.setStateAsync(upd, { val: tsLocal, ack: true });
+
+   			// --- Raw Timestamp ---
+   			await this.setObjectNotExistsAsync(raw, {
+   				type: "state",
+   				common: {
+   					name: `Timestamp Measure ${t}`,
+   					type: "number",
+   					role: "value",
+   					read: true,
+   					write: false,
+   				},
+   				native: {},
+   			});
+   			await this.setStateAsync(raw, { val: tsRaw, ack: true });
+
+   			seen.add(t);
+   		}
    	}
-     }
    }
 
 
@@ -478,10 +492,10 @@ class Withings extends utils.Adapter {
        let storeValue = rawValue;
 
        // convert modified from unix seconds to ISO
-       if (key === "modified") {
-         const iso = this.toIso(rawValue);
-         if (iso !== null) storeValue = iso;
-       }
+       // if (key === "modified") {
+       //  const iso = this.toIso(rawValue);
+       //  if (iso !== null) storeValue = iso;
+       //}
 
        const stateId = `${userid}.lastActivity.${key}`;
 
@@ -537,10 +551,10 @@ class Withings extends utils.Adapter {
        const rawValue = series[key];
        let storeValue = rawValue;
 
-       if (["created", "startdate", "enddate", "modified"].includes(key)) {
-         const iso = this.toIso(rawValue);
-         if (iso !== null) storeValue = iso;
-       }
+     //  if (["created", "startdate", "enddate", "modified"].includes(key)) {
+     //    const iso = this.toIso(rawValue);
+     //    if (iso !== null) storeValue = iso;
+     //  }
 
        const stateId = `${userid}.lastSleep.${key}`;
 
@@ -944,4 +958,3 @@ if (require.main !== module) {
  // otherwise start the instance directly
  new Withings();
 }
-
