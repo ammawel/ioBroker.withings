@@ -395,7 +395,7 @@ async writeLastMeasures(userid, measuregrps, descriptions) {
    for (const grp of measuregrps) {
        if (!grp?.measures) continue;
 
-       const tsRaw = Number(grp.date) || null; // Sekunden
+       const tsRaw = Number(grp.date * 1000) || null; // Sekunden
 
        for (const m of grp.measures) {
            const t = m.type;
