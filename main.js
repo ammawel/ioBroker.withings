@@ -395,7 +395,7 @@ async writeLastMeasures(userid, measuregrps, descriptions) {
    for (const grp of measuregrps) {
        if (!grp?.measures) continue;
 
-       const tsRaw = Number(grp.date * 1000) || null; // Sekunden
+       const tsRaw = Number(grp.date) || null; // Sekunden
 
        for (const m of grp.measures) {
            const t = m.type;
@@ -443,141 +443,134 @@ async writeLastMeasures(userid, measuregrps, descriptions) {
   * Schreibe die letzte Aktivität als States unter userid.lastActivity.<key>
   * data ist die body-Antwort mit data.activities (Array)
   */
- async writeLastActivity(userid, data) {
-   try {
-     if (!data || !Array.isArray(data.activities) || data.activities.length === 0) return;
+   async writeLastActivity(userid, data) {
+   	try {
+   		if (!data || !Array.isArray(data.activities) || data.activities.length === 0) return;
 
-     // Wir haben in updateDevices() data.activities.sort(...) – dort wird sortiert. Hier nehmen wir das erste Element (neueste)
-     const activity = data.activities[0];
-     if (!activity) return;
+   		// Neueste Aktivität
+   		const activity = data.activities[0];
+   		if (!activity) return;
 
-     // Channel anlegen
-     await this.setObjectNotExistsAsync(userid + ".lastActivity", {
-       type: "channel",
-       common: {
-         name: "Letzte Aktivität",
-       },
-       native: {},
-     });
+   		await this.setObjectNotExistsAsync(`${userid}.lastActivity`, {
+   			type: "channel",
+   			common: { name: "Letzte Aktivität" },
+   			native: {},
+   		});
 
-     // Schreibe alle Felder der Aktivität als einzelne States
-     for (const key of Object.keys(activity)) {
-       const rawValue = activity[key];
-       let storeValue = rawValue;
+   		// Felder, die eindeutig Zeitstempel darstellen
+   		const isDateField = (key) =>
+   			/(date|startdate|enddate|timestamp|modified|created)$/i.test(key);
 
-       // convert modified from unix seconds to ISO
-       // if (key === "modified") {
-       //  const iso = this.toIso(rawValue);
-       //  if (iso !== null) storeValue = iso;
-       //}
+   		for (const key of Object.keys(activity)) {
+   			const rawValue = activity[key];
+   			const stateId = `${userid}.lastActivity.${key}`;
 
-       const stateId = `${userid}.lastActivity.${key}`;
+   			const common = {
+   				name: `Letzte Aktivität - ${key}`,
+   				type: typeof rawValue === "number" ? "number" : "string",
+   				role: isDateField(key) ? "date" : "value",
+   				read: true,
+   				write: false,
+   			};
 
-       // Datentyp bestimmen
-       const common = {
-         name: `Letzte Aktivität - ${key}`,
-         type: typeof storeValue === "number" ? "number" : "string",
-         role: "value",
-         read: true,
-         write: false,
-       };
+   			await this.setObjectNotExistsAsync(stateId, {
+   				type: "state",
+   				common,
+   				native: {},
+   			});
 
-       await this.setObjectNotExistsAsync(stateId, {
-         type: "state",
-         common,
-         native: {},
-       });
+   			const outValue =
+   				typeof rawValue === "object" ? JSON.stringify(rawValue) : rawValue;
 
-       // Falls Objekt oder Array, als JSON-String speichern, damit nichts verloren geht
-       const outValue = typeof storeValue === "object" ? JSON.stringify(storeValue) : storeValue;
-       await this.setStateAsync(stateId, { val: outValue, ack: true });
-     }
-   } catch (e) {
-     this.log.error("writeLastActivity failed: " + e);
+   			await this.setStateAsync(stateId, { val: outValue, ack: true });
+   		}
+
+   	} catch (e) {
+   		this.log.error("writeLastActivity failed: " + e);
+   	}
    }
- }
+
 
  /**
   * Schreibe die letzte Sleep Summary als States unter userid.lastSleep.<key>
   * data ist die body-Antwort, erwartet data.series (Array)
   * Konvertiert: created, startdate, enddate, modified -> ISO
   */
- async writeLastSleepSummary(userid, data) {
+async writeLastSleepSummary(userid, data) {
    try {
-     if (!data || !Array.isArray(data.series) || data.series.length === 0) return;
+       if (!data || !Array.isArray(data.series) || data.series.length === 0) return;
 
-     // In updateDevices() haben wir data.series.sort(...) (neueste zuerst), also nehmen wir das erste Element
-     const series = data.series[0] || data.series[data.series.length - 1];
-     if (!series) return;
+       const series = data.series[0] || data.series[data.series.length - 1];
+       if (!series) return;
 
-     // Channel anlegen
-     await this.setObjectNotExistsAsync(userid + ".lastSleep", {
-       type: "channel",
-       common: {
-         name: "Letzte Sleep Summary",
-       },
-       native: {},
-     });
-
-     // Oberflächenwerte (alles außer 'data')
-     for (const key of Object.keys(series)) {
-       if (key === "data") continue;
-       const rawValue = series[key];
-       let storeValue = rawValue;
-
-     //  if (["created", "startdate", "enddate", "modified"].includes(key)) {
-     //    const iso = this.toIso(rawValue);
-     //    if (iso !== null) storeValue = iso;
-     //  }
-
-       const stateId = `${userid}.lastSleep.${key}`;
-
-       const common = {
-         name: `Letzte Sleep - ${key}`,
-         type: typeof storeValue === "number" ? "number" : "string",
-         role: "value",
-         read: true,
-         write: false,
-       };
-
-       await this.setObjectNotExistsAsync(stateId, {
-         type: "state",
-         common,
-         native: {},
+       await this.setObjectNotExistsAsync(`${userid}.lastSleep`, {
+           type: "channel",
+           common: { name: "Letzte Sleep Summary" },
+           native: {},
        });
 
-       const outValue = typeof storeValue === "object" ? JSON.stringify(storeValue) : storeValue;
-       await this.setStateAsync(stateId, { val: outValue, ack: true });
-     }
+       const isDateField = (key) =>
+           /(date|startdate|enddate|modified|created)$/i.test(key);
 
-     // Falls es ein data-Objekt gibt (detaillierte Werte), diese ebenfalls ablegen
-     if (series.data && typeof series.data === "object") {
-       for (const key of Object.keys(series.data)) {
-         const value = series.data[key];
-         const stateId = `${userid}.lastSleep.${key}`;
+       // --- Obere Ebene ---
+       for (const key of Object.keys(series)) {
+           if (key === "data") continue;
 
-         const common = {
-           name: `Letzte Sleep - ${key}`,
-           type: typeof value === "number" ? "number" : "string",
-           role: "value",
-           read: true,
-           write: false,
-         };
+           const rawValue = series[key];
+           const stateId = `${userid}.lastSleep.${key}`;
 
-         await this.setObjectNotExistsAsync(stateId, {
-           type: "state",
-           common,
-           native: {},
-         });
+           const common = {
+               name: `Letzte Sleep - ${key}`,
+               type: typeof rawValue === "number" ? "number" : "string",
+               role: isDateField(key) ? "date" : "value",
+               read: true,
+               write: false,
+           };
 
-         const outValue = typeof value === "object" ? JSON.stringify(value) : value;
-         await this.setStateAsync(stateId, { val: outValue, ack: true });
+           await this.setObjectNotExistsAsync(stateId, {
+               type: "state",
+               common,
+               native: {},
+           });
+
+           const outValue =
+               typeof rawValue === "object" ? JSON.stringify(rawValue) : rawValue;
+
+           await this.setStateAsync(stateId, { val: outValue, ack: true });
        }
-     }
+
+       // --- data-Objekt ---
+       if (series.data && typeof series.data === "object") {
+           for (const key of Object.keys(series.data)) {
+               const rawValue = series.data[key];
+               const stateId = `${userid}.lastSleep.${key}`;
+
+               const common = {
+                   name: `Letzte Sleep - ${key}`,
+                   type: typeof rawValue === "number" ? "number" : "string",
+                   role: isDateField(key) ? "date" : "value",
+                   read: true,
+                   write: false,
+               };
+
+               await this.setObjectNotExistsAsync(stateId, {
+                   type: "state",
+                   common,
+                   native: {},
+               });
+
+               const outValue =
+                   typeof rawValue === "object" ? JSON.stringify(rawValue) : rawValue;
+
+               await this.setStateAsync(stateId, { val: outValue, ack: true });
+           }
+       }
    } catch (e) {
-     this.log.error("writeLastSleepSummary failed: " + e);
+       this.log.error("writeLastSleepSummary failed: " + e);
    }
- }
+}
+
+
 
  async updateDevices() {
    for (const session of this.session) {
@@ -932,3 +925,4 @@ if (require.main !== module) {
  // otherwise start the instance directly
  new Withings();
 }
+
